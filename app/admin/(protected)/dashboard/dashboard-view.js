@@ -1,27 +1,170 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { collection, getDocs } from "firebase/firestore";
+import { toast } from "sonner";
 
 import { StatCard } from "@/components/StatCard";
 import { MemberTable } from "@/components/MemberTable";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { dashboardStats, recentMemberActivity } from "@/data/dashboard-data";
-import { toast } from "sonner";
+import { db } from "@/lib/firebase/client";
+
+function parseDateValue(value) {
+  if (!value) return null;
+
+  if (typeof value?.toDate === "function") {
+    return value.toDate();
+  }
+
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+
+    const alt = new Date(
+      value.replace(/\b(\d{1,2})\s+(\w{3})\s+(\d{4})\b/, "$1 $2 $3"),
+    );
+    if (!Number.isNaN(alt.getTime())) return alt;
+  }
+
+  return null;
+}
+
+function normalizeMemberStatus(member) {
+  const pendingAmount = Number(member.pendingAmount ?? 0);
+  if (pendingAmount > 0) return "pending";
+
+  const expiry = parseDateValue(member.expiryDate);
+  if (!expiry) return "active";
+
+  return expiry.getTime() < Date.now() ? "expired" : "active";
+}
+
+function toDashboardMember(member) {
+  const id = String(member.memberId ?? member.id ?? "");
+  const expiryDate = parseDateValue(member.expiryDate);
+  const dueDate = expiryDate ? expiryDate.toISOString().slice(0, 10) : "";
+
+  return {
+    id,
+    name: member.name ?? "Unknown member",
+    phone: member.mobile ?? "N/A",
+    plan: member.planName ?? "Monthly",
+    dueDate,
+    status: normalizeMemberStatus(member),
+  };
+}
 
 export default function DashboardView() {
+  const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 500);
-    return () => clearTimeout(timer);
+    let active = true;
+
+    async function loadMembers() {
+      try {
+        const snapshot = await getDocs(collection(db, "members"));
+        const rows = snapshot.docs.map((doc) => ({
+          ...doc.data(),
+          id: doc.id,
+        }));
+
+        if (!active) return;
+        setMembers(rows);
+      } catch (error) {
+        console.error("Failed to load dashboard members:", error);
+        if (active) setMembers([]);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    loadMembers();
+    return () => {
+      active = false;
+    };
   }, []);
+
+  const dashboardStats = useMemo(() => {
+    const totalMembers = members.length;
+    const activeCount = members.filter(
+      (member) => normalizeMemberStatus(member) === "active",
+    ).length;
+    const expiringSoon = members.filter((member) => {
+      const expiry = parseDateValue(member.expiryDate);
+      if (!expiry) return false;
+      const diffDays = (expiry.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
+      return diffDays >= 0 && diffDays <= 7;
+    }).length;
+    const pendingAmount = members.reduce(
+      (sum, member) => sum + Number(member.pendingAmount ?? 0),
+      0,
+    );
+    const monthlyCollection = members.reduce(
+      (sum, member) => sum + Number(member.paid ?? 0),
+      0,
+    );
+
+    return [
+      {
+        id: "total-members",
+        label: "TOTAL MEMBERS",
+        value: totalMembers.toLocaleString(),
+        accent: "none",
+        icon: null,
+      },
+      {
+        id: "active",
+        label: "ACTIVE",
+        value: activeCount.toLocaleString(),
+        accent: "none",
+        icon: "bolt",
+      },
+      {
+        id: "expiring-soon",
+        label: "EXPIRING SOON",
+        value: expiringSoon.toLocaleString(),
+        accent: "warning",
+        icon: null,
+      },
+      {
+        id: "pending-amount",
+        label: "PENDING AMOUNT",
+        value: `₹${pendingAmount.toLocaleString()}`,
+        accent: "danger",
+        icon: null,
+      },
+      {
+        id: "monthly-collection",
+        label: "MONTHLY COLLECTION",
+        value: `₹${monthlyCollection.toLocaleString()}`,
+        accent: "none",
+        icon: null,
+      },
+    ];
+  }, [members]);
+
+  const recentMemberActivity = useMemo(
+    () =>
+      members
+        .map(toDashboardMember)
+        .sort((a, b) => {
+          const aDate = a.dueDate ? new Date(a.dueDate).getTime() : 0;
+          const bDate = b.dueDate ? new Date(b.dueDate).getTime() : 0;
+          return aDate - bDate;
+        })
+        .slice(0, 5),
+    [members],
+  );
 
   function handleRemind(memberId) {
     const member = recentMemberActivity.find((item) => item.id === memberId);
     toast.success("Reminder sent", {
-      description: member ? `${member.name} was notified about their balance.` : undefined,
+      description: member
+        ? `${member.name} was notified about their balance.`
+        : undefined,
     });
   }
 
@@ -36,9 +179,9 @@ export default function DashboardView() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         {loading
-          ? Array.from({ length: 4 }).map((_, index) => (
+          ? Array.from({ length: 5 }).map((_, index) => (
               <Skeleton key={index} className="h-24 w-full rounded-xl" />
             ))
           : dashboardStats.map((stat) => (

@@ -40,10 +40,17 @@ export const dashboardStats = /** @type {StatCard[]} */ ([
     icon: null,
   },
   {
-    id: "pending-payments",
-    label: "PENDING PAYMENTS",
-    value: "19",
+    id: "pending-amount",
+    label: "PENDING AMOUNT",
+    value: "$2,340",
     accent: "danger",
+    icon: null,
+  },
+  {
+    id: "monthly-collection",
+    label: "MONTHLY COLLECTION",
+    value: "$48,960",
+    accent: "none",
     icon: null,
   },
 ]);
