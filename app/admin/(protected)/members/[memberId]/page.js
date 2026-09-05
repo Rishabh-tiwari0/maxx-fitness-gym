@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import {
   ArrowLeft,
   Calendar,
+  CalendarCheck,
   CreditCard,
   Mail,
   Phone,
@@ -10,8 +11,10 @@ import {
 } from "lucide-react";
 
 import { getMemberById } from "@/lib/firebase/members";
+import { getMonthlyAttendanceCount } from "@/lib/firebase/attendance";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DeleteMemberButton } from "@/components/DeleteMemberButton";
 import { formatINR, formatISODateTimeLabel, getInitials } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +27,6 @@ export async function generateMetadata({ params }) {
   };
 }
 
-/** One label/value row used throughout the detail cards. */
 function DetailRow({ label, value }) {
   return (
     <div className="flex items-center justify-between gap-4 py-2 text-sm">
@@ -42,10 +44,14 @@ export default async function MemberDetailsPage({ params }) {
     notFound();
   }
 
+  const isoMonth = new Date().toISOString().slice(0, 7); // "yyyy-mm"
+  const monthlyAttendance = await getMonthlyAttendanceCount(memberId, isoMonth);
+
   const today = new Date();
   const expiry = member.expiryDate ? new Date(member.expiryDate) : null;
   const isExpired = expiry ? expiry.getTime() < today.getTime() : false;
   const hasPending = (member.pendingAmount ?? 0) > 0;
+  const monthLabel = today.toLocaleDateString("en-US", { month: "long" });
 
   return (
     <div className="container space-y-6 py-8">
@@ -72,7 +78,7 @@ export default async function MemberDetailsPage({ params }) {
           </div>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Badge variant={isExpired ? "destructive" : "secondary"}>
             {isExpired ? "Expired" : "Active"}
           </Badge>
@@ -83,6 +89,10 @@ export default async function MemberDetailsPage({ params }) {
           ) : (
             <Badge variant="secondary">Paid up</Badge>
           )}
+          <DeleteMemberButton
+            memberId={member.memberId}
+            memberName={member.name}
+          />
         </div>
       </div>
 
@@ -178,6 +188,23 @@ export default async function MemberDetailsPage({ params }) {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center gap-2 space-y-0">
+          <CalendarCheck className="h-4 w-4 text-primary" aria-hidden="true" />
+          <CardTitle className="text-base">Attendance</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-baseline gap-2">
+            <span className="font-display text-3xl font-extrabold text-primary">
+              {monthlyAttendance}
+            </span>
+            <span className="text-sm text-muted-foreground">
+              days present in {monthLabel}
+            </span>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -1,48 +1,162 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { SlidersHorizontal } from "lucide-react";
+import { toast } from "sonner";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  query,
+  setDoc,
+  where,
+} from "firebase/firestore";
 
 import { SearchBar } from "@/components/SearchBar";
 import { DatePickerField } from "@/components/DatePickerField";
 import { AttendanceTable } from "@/components/AttendanceTable";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
-import { attendanceMembers } from "@/data/attendance-data";
-import { computeAttendanceRate, generateAttendanceForDate } from "@/lib/attendance";
-import { todayISODate } from "@/lib/format";
+import { computeAttendanceRate } from "@/lib/attendance";
+import { getInitials } from "@/lib/format";
+import { db } from "@/lib/firebase/client";
 
-export default function AttendanceView() {
-  const today = useMemo(() => todayISODate(), []);
+/**
+ * @param {{
+ *   members: import("@/lib/firebase/members").Member[],
+ *   initialAttendance: import("@/lib/firebase/attendance").AttendanceRecord[],
+ *   today: string,
+ *   adminEmail: string|null,
+ * }} props
+ */
+export default function AttendanceView({
+  members,
+  initialAttendance,
+  today,
+  adminEmail,
+}) {
   const [selectedDate, setSelectedDate] = useState(today);
+  const [attendanceByMemberId, setAttendanceByMemberId] = useState(() =>
+    toMap(initialAttendance),
+  );
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [togglingId, setTogglingId] = useState(null);
+
+  const isToday = selectedDate === today;
 
   useEffect(() => {
-    setLoading(true);
-    const timer = setTimeout(() => setLoading(false), 450);
-    return () => clearTimeout(timer);
-  }, [selectedDate]);
+    // Already have this from the server for the initial date — skip refetch.
+    if (selectedDate === today) {
+      setAttendanceByMemberId(toMap(initialAttendance));
+      return;
+    }
 
-  const allRecordsForDate = useMemo(
-    () => generateAttendanceForDate(selectedDate, attendanceMembers),
-    [selectedDate]
+    let cancelled = false;
+    setLoading(true);
+
+    const attendanceQuery = query(
+      collection(db, "attendance"),
+      where("date", "==", selectedDate),
+    );
+
+    getDocs(attendanceQuery)
+      .then((snapshot) => {
+        if (cancelled) return;
+        const records = snapshot.docs.map((d) => d.data());
+        setAttendanceByMemberId(toMap(records));
+      })
+      .catch((error) => {
+        console.error("Failed to load attendance for date:", error);
+        if (!cancelled) toast.error("Couldn't load attendance for that date.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedDate, today, initialAttendance]);
+
+  const records = useMemo(
+    () =>
+      members.map((member) => {
+        const attendance = attendanceByMemberId[member.memberId];
+        return {
+          id: member.memberId,
+          name: member.name,
+          initials: getInitials(member.name || "?"),
+          memberCode: member.memberId,
+          present: Boolean(attendance),
+          checkInTime: attendance?.checkInTime
+            ? new Date(attendance.checkInTime).toLocaleTimeString("en-US", {
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : null,
+        };
+      }),
+    [members, attendanceByMemberId],
   );
 
-  const attendanceRate = computeAttendanceRate(allRecordsForDate);
-  const presentCount = allRecordsForDate.filter((record) => record.present).length;
+  const attendanceRate = computeAttendanceRate(records);
+  const presentCount = records.filter((record) => record.present).length;
 
   const filteredRecords = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return allRecordsForDate;
-    return allRecordsForDate.filter(
+    if (!term) return records;
+    return records.filter(
       (record) =>
         record.name.toLowerCase().includes(term) ||
-        record.memberCode.toLowerCase().includes(term)
+        record.memberCode.toLowerCase().includes(term),
     );
-  }, [allRecordsForDate, search]);
+  }, [records, search]);
+
+  async function handleTogglePresent(memberId) {
+    if (!isToday) return; // read-only for past dates
+
+    setTogglingId(memberId);
+    const docId = `${memberId}_${selectedDate}`;
+    const alreadyPresent = Boolean(attendanceByMemberId[memberId]);
+
+    try {
+      if (alreadyPresent) {
+        await deleteDoc(doc(db, "attendance", docId));
+        setAttendanceByMemberId((prev) => {
+          const next = { ...prev };
+          delete next[memberId];
+          return next;
+        });
+      } else {
+        const checkInTime = new Date().toISOString();
+        await setDoc(doc(db, "attendance", docId), {
+          memberId,
+          date: selectedDate,
+          checkInTime,
+          markedBy: adminEmail,
+        });
+        setAttendanceByMemberId((prev) => ({
+          ...prev,
+          [memberId]: {
+            memberId,
+            date: selectedDate,
+            checkInTime,
+            markedBy: adminEmail,
+          },
+        }));
+      }
+    } catch (error) {
+      console.error("Failed to update attendance:", error);
+      toast.error("Couldn't update attendance", {
+        description:
+          "Something went wrong writing to Firestore. Please try again.",
+      });
+    } finally {
+      setTogglingId(null);
+    }
+  }
 
   return (
     <div className="container space-y-6 py-8">
@@ -57,7 +171,7 @@ export default function AttendanceView() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Today&apos;s Attendance</CardTitle>
+          <CardTitle>{isToday ? "Today's Attendance" : "Attendance"}</CardTitle>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -68,7 +182,7 @@ export default function AttendanceView() {
                 {attendanceRate}%
               </span>
               <span className="text-sm text-muted-foreground">
-                / {allRecordsForDate.length} Members ({presentCount} checked in)
+                / {records.length} Members ({presentCount} checked in)
               </span>
             </div>
           )}
@@ -91,16 +205,29 @@ export default function AttendanceView() {
           ariaLabel="Select attendance date"
           className="sm:w-56"
         />
-        <Button variant="outline" size="icon" aria-label="Filter results" className="shrink-0">
-          <SlidersHorizontal className="h-4 w-4" />
-        </Button>
       </div>
+
+      {!isToday && (
+        <p className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+          Viewing a past date — read-only. Switch to today to mark attendance.
+        </p>
+      )}
 
       <Card>
         <CardContent className="pt-5">
-          <AttendanceTable records={filteredRecords} loading={loading} />
+          <AttendanceTable
+            records={filteredRecords}
+            loading={loading}
+            readOnly={!isToday}
+            togglingId={togglingId}
+            onTogglePresent={handleTogglePresent}
+          />
         </CardContent>
       </Card>
     </div>
   );
+}
+
+function toMap(records) {
+  return Object.fromEntries(records.map((record) => [record.memberId, record]));
 }

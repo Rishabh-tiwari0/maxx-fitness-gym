@@ -1,5 +1,5 @@
 import { getAllMembers } from "@/lib/firebase/members";
-import { MembersView } from "./members-view";
+import MembersView from "./members-view";
 
 export const metadata = {
   title: "Members",

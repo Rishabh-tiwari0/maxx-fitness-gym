@@ -2,31 +2,78 @@
 
 import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
+import { addDoc, collection, Timestamp } from "firebase/firestore";
+import { toast } from "sonner";
 
 import { MemberCard } from "@/components/MemberCard";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { db } from "@/lib/firebase/client";
 
 const PAGE_SIZE = 12;
+
+const PLAN_DURATION_MONTHS = {
+  Monthly: 1,
+  Quarterly: 3,
+  "Half-Yearly": 6,
+  Annual: 12,
+};
+
+/** Today + the plan's duration, as a yyyy-mm-dd string for a date input. */
+function computeExpiryDate(planName, fromDate = new Date()) {
+  const months = PLAN_DURATION_MONTHS[planName] ?? 1;
+  const result = new Date(fromDate);
+  result.setMonth(result.getMonth() + months);
+  return result.toISOString().slice(0, 10);
+}
+
+function getDefaultForm() {
+  return {
+    name: "",
+    mobile: "",
+    age: "",
+    gender: "male",
+    email: "",
+    planName: "Monthly",
+    planAmount: "800",
+    paid: "0",
+    pendingAmount: "600",
+    expiryDate: computeExpiryDate("Monthly"),
+  };
+}
 
 /**
  * @param {{ members: import("@/lib/firebase/members").Member[] }} props
  */
 export function MembersView({ members }) {
+  const [memberRows, setMemberRows] = useState(members);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [form, setForm] = useState(getDefaultForm);
+  const [submitting, setSubmitting] = useState(false);
 
   const filteredMembers = useMemo(() => {
     const query = search.trim().toLowerCase();
-    if (!query) return members;
+    if (!query) return memberRows;
 
-    return members.filter((member) => {
+    return memberRows.filter((member) => {
       const nameMatch = member.name?.toLowerCase().includes(query);
       const mobileMatch = member.mobile?.includes(query);
       return nameMatch || mobileMatch;
     });
-  }, [members, search]);
+  }, [memberRows, search]);
 
   const totalPages = Math.max(1, Math.ceil(filteredMembers.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -40,6 +87,87 @@ export function MembersView({ members }) {
     setPage(1);
   }
 
+  function handleFieldChange(event) {
+    const { name, value } = event.target;
+    setForm((current) => {
+      const next = { ...current, [name]: value };
+      // Re-derive the expiry date whenever the plan changes, from today.
+      if (name === "planName") {
+        next.expiryDate = computeExpiryDate(value);
+      }
+      return next;
+    });
+  }
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+
+    const name = form.name.trim();
+    const mobile = form.mobile.trim();
+    const planName = form.planName.trim();
+    const planAmount = Number(form.planAmount || 0);
+    const pendingAmount = Number(form.pendingAmount || 0);
+    const ageValue = form.age === "" ? null : Number(form.age);
+
+    if (
+      !name ||
+      !mobile ||
+      !planName ||
+      Number.isNaN(planAmount) ||
+      planAmount <= 0
+    ) {
+      toast.error("Couldn't save member", {
+        description:
+          "Name, mobile, plan name, and a plan amount above 0 are required.",
+      });
+      return;
+    }
+
+    const now = new Date();
+    const expiryDate = form.expiryDate ? new Date(form.expiryDate) : new Date();
+    const memberIdNumber = Date.now();
+    const memberRecord = {
+      memberId: memberIdNumber,
+      name,
+      mobile,
+      age: ageValue,
+      gender: form.gender || "male",
+      email: form.email.trim() || null,
+      planName,
+      planAmount,
+      paid: Number(form.paid || 0),
+      pendingAmount,
+      memberAdded: Timestamp.fromDate(now),
+      purchaseDate: Timestamp.fromDate(now),
+      expiryDate: Timestamp.fromDate(expiryDate),
+    };
+
+    try {
+      setSubmitting(true);
+      const docRef = await addDoc(collection(db, "members"), memberRecord);
+      const savedMember = {
+        ...memberRecord,
+        memberId: String(docRef.id),
+      };
+
+      setMemberRows((current) => [savedMember, ...current]);
+      setForm(getDefaultForm());
+      setIsDialogOpen(false);
+      setPage(1);
+      toast.success("Member added", {
+        description: `${savedMember.name} was saved to Firestore.`,
+      });
+    } catch (error) {
+      console.error("Failed to add member:", error);
+      toast.error("Couldn't save member", {
+        description:
+          "Something went wrong writing to Firestore. Please try again.",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <div className="container space-y-6 py-8">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -48,22 +176,26 @@ export function MembersView({ members }) {
             Members
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {members.length} total members
+            {memberRows.length} total members
           </p>
         </div>
 
-        <div className="relative w-full sm:w-80">
-          <Search
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-            aria-hidden="true"
-          />
-          <Input
-            value={search}
-            onChange={handleSearchChange}
-            placeholder="Search by name or mobile number"
-            className="pl-9"
-            aria-label="Search members by name or mobile number"
-          />
+        <div className="flex w-full items-center gap-3 sm:w-auto">
+          <div className="relative w-full sm:w-80">
+            <Search
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <Input
+              value={search}
+              onChange={handleSearchChange}
+              placeholder="Search by name or mobile number"
+              className="pl-9"
+              aria-label="Search members by name or mobile number"
+            />
+          </div>
+
+          <Button onClick={() => setIsDialogOpen(true)}>Add Member</Button>
         </div>
       </div>
 
@@ -114,6 +246,167 @@ export function MembersView({ members }) {
           </div>
         </div>
       ) : null}
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Add New Member</DialogTitle>
+            <DialogDescription>
+              Add a new member profile to the Firebase database.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleSubmit} className="space-y-4 pt-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="name">Full Name</Label>
+                <Input
+                  id="name"
+                  name="name"
+                  value={form.name}
+                  onChange={handleFieldChange}
+                  placeholder="Enter member name"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="mobile">Mobile</Label>
+                <Input
+                  id="mobile"
+                  name="mobile"
+                  type="tel"
+                  value={form.mobile}
+                  onChange={handleFieldChange}
+                  placeholder="Enter mobile number"
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="age">Age</Label>
+                <Input
+                  id="age"
+                  name="age"
+                  type="number"
+                  min="0"
+                  value={form.age}
+                  onChange={handleFieldChange}
+                  placeholder="Optional"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="gender">Gender</Label>
+                <select
+                  id="gender"
+                  name="gender"
+                  value={form.gender}
+                  onChange={handleFieldChange}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  name="email"
+                  type="email"
+                  value={form.email}
+                  onChange={handleFieldChange}
+                  placeholder="Optional"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="planName">Plan Name</Label>
+                <select
+                  id="planName"
+                  name="planName"
+                  value={form.planName}
+                  onChange={handleFieldChange}
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  <option value="Monthly">Monthly</option>
+                  <option value="Quarterly">Quarterly</option>
+                  <option value="Half-Yearly">Half-Yearly</option>
+                  <option value="Annual">Annual</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="planAmount">Plan Amount</Label>
+                <Input
+                  id="planAmount"
+                  name="planAmount"
+                  type="number"
+                  min="0"
+                  value={form.planAmount}
+                  onChange={handleFieldChange}
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="paid">Paid</Label>
+                <Input
+                  id="paid"
+                  name="paid"
+                  type="number"
+                  min="0"
+                  value={form.paid}
+                  onChange={handleFieldChange}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="pendingAmount">Pending Amount</Label>
+                <Input
+                  id="pendingAmount"
+                  name="pendingAmount"
+                  type="number"
+                  min="0"
+                  value={form.pendingAmount}
+                  onChange={handleFieldChange}
+                />
+              </div>
+
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="expiryDate">Expiry Date</Label>
+                <Input
+                  id="expiryDate"
+                  name="expiryDate"
+                  type="date"
+                  value={form.expiryDate}
+                  onChange={handleFieldChange}
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setForm(getDefaultForm())}
+                >
+                  Cancel
+                </Button>
+              </DialogClose>
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Saving..." : "Save Member"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
+
+export default MembersView;

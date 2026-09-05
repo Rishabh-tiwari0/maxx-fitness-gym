@@ -3,8 +3,15 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, DollarSign, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
+import {
+  addDoc,
+  collection,
+  doc,
+  Timestamp,
+  updateDoc,
+} from "firebase/firestore";
 
-import { paymentMembers, paymentMethods } from "@/data/payment-data";
+import { paymentMethods } from "@/data/payment-data";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,10 +32,15 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { formatCurrency } from "@/lib/format";
+import { formatINR } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { db } from "@/lib/firebase/client";
 
-export function PaymentFormCard() {
+/**
+ * @param {{ members: import("@/lib/firebase/members").Member[] }} props
+ */
+export function PaymentFormCard({ members }) {
+  const [memberRows, setMemberRows] = useState(members);
   const [query, setQuery] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState("");
@@ -36,23 +48,26 @@ export function PaymentFormCard() {
   const [method, setMethod] = useState("cash");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [formError, setFormError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const selectedMember =
-    paymentMembers.find((member) => member.id === selectedMemberId) ?? null;
+    memberRows.find((member) => member.memberId === selectedMemberId) ?? null;
 
   const filteredMembers = useMemo(() => {
     const term = query.trim().toLowerCase();
-    if (!term) return paymentMembers;
-    return paymentMembers.filter(
+    if (!term) return memberRows;
+    return memberRows.filter(
       (member) =>
-        member.name.toLowerCase().includes(term) ||
-        member.memberCode.toLowerCase().includes(term),
+        member.name?.toLowerCase().includes(term) ||
+        member.mobile?.includes(term),
     );
-  }, [query]);
+  }, [memberRows, query]);
 
   function handleSelectMember(member) {
-    setSelectedMemberId(member.id);
-    setAmount(String(member.amountDue));
+    setSelectedMemberId(member.memberId);
+    // Pre-fill with what's actually owed; staff can still edit it (e.g. a
+    // partial payment, or collecting next cycle's fee early).
+    setAmount(member.pendingAmount > 0 ? String(member.pendingAmount) : "");
     setQuery("");
     setIsSearchOpen(false);
     setFormError("");
@@ -72,14 +87,66 @@ export function PaymentFormCard() {
     setConfirmOpen(true);
   }
 
-  function handleConfirmPayment() {
+  async function handleConfirmPayment() {
     setConfirmOpen(false);
-    toast.success("Payment recorded", {
-      description: `${formatCurrency(Number.parseFloat(amount))} from ${selectedMember.name}`,
-    });
-    setSelectedMemberId("");
-    setAmount("");
-    setMethod("cash");
+
+    const member = selectedMember;
+    const numericAmount = Number.parseFloat(amount);
+    if (!member || !numericAmount || numericAmount <= 0) return;
+
+    const newPaid = (member.paid ?? 0) + numericAmount;
+    // Amounts beyond what was due count as credit toward the next cycle
+    // rather than going negative here.
+    const newPendingAmount = Math.max(
+      0,
+      (member.pendingAmount ?? 0) - numericAmount,
+    );
+
+    try {
+      setSubmitting(true);
+
+      // Update the member's running totals...
+      await updateDoc(doc(db, "members", member.memberId), {
+        paid: newPaid,
+        pendingAmount: newPendingAmount,
+      });
+
+      // ...and keep a record of the transaction itself for history/audit.
+      await addDoc(collection(db, "payments"), {
+        memberId: member.memberId,
+        memberName: member.name,
+        amount: numericAmount,
+        method,
+        recordedAt: Timestamp.now(),
+      });
+
+      setMemberRows((current) =>
+        current.map((row) =>
+          row.memberId === member.memberId
+            ? { ...row, paid: newPaid, pendingAmount: newPendingAmount }
+            : row,
+        ),
+      );
+
+      toast.success("Payment recorded", {
+        description:
+          newPendingAmount > 0
+            ? `${formatINR(numericAmount)} from ${member.name} — ${formatINR(newPendingAmount)} still due.`
+            : `${formatINR(numericAmount)} from ${member.name} — fully paid up.`,
+      });
+
+      setSelectedMemberId("");
+      setAmount("");
+      setMethod("cash");
+    } catch (error) {
+      console.error("Failed to record payment:", error);
+      toast.error("Couldn't record payment", {
+        description:
+          "Something went wrong writing to Firestore. Please try again.",
+      });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -90,7 +157,7 @@ export function PaymentFormCard() {
             Take Payment
           </CardTitle>
           <CardDescription>
-            Process a new transaction for a member.
+            Record an offline payment for a member.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5 px-4 sm:px-6">
@@ -119,7 +186,7 @@ export function PaymentFormCard() {
                   autoFocus
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Search by name or ID..."
+                  placeholder="Search by name or mobile..."
                   aria-label="Search members"
                   className="rounded-none border-0 border-b border-border focus-visible:ring-0"
                 />
@@ -130,18 +197,29 @@ export function PaymentFormCard() {
                     </li>
                   ) : (
                     filteredMembers.map((member) => (
-                      <li key={member.id}>
+                      <li key={member.memberId}>
                         <button
                           type="button"
                           role="option"
-                          aria-selected={member.id === selectedMemberId}
+                          aria-selected={member.memberId === selectedMemberId}
                           onClick={() => handleSelectMember(member)}
                           className="flex w-full items-center justify-between px-3 py-2 text-left text-sm transition-colors hover:bg-secondary"
                         >
-                          <span>{member.name}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {member.memberCode}
+                          <span>
+                            {member.name}
+                            <span className="ml-1.5 text-xs text-muted-foreground">
+                              {member.mobile}
+                            </span>
                           </span>
+                          {member.pendingAmount > 0 ? (
+                            <span className="text-xs font-semibold text-rose-600">
+                              Due {formatINR(member.pendingAmount)}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">
+                              Paid up
+                            </span>
+                          )}
                         </button>
                       </li>
                     ))
@@ -150,6 +228,13 @@ export function PaymentFormCard() {
               </div>
             ) : null}
           </div>
+
+          {selectedMember ? (
+            <p className="text-xs text-muted-foreground">
+              {selectedMember.planName} plan · Paid{" "}
+              {formatINR(selectedMember.paid ?? 0)} so far
+            </p>
+          ) : null}
 
           <div className="space-y-1.5">
             <Label htmlFor="amount">Amount</Label>
@@ -204,9 +289,10 @@ export function PaymentFormCard() {
             size="lg"
             className="glow-primary w-full uppercase tracking-wide"
             onClick={handlePayNowClick}
+            disabled={submitting}
           >
             <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-            Pay Now
+            {submitting ? "Recording..." : "Pay Now"}
           </Button>
         </CardContent>
       </Card>
@@ -222,7 +308,7 @@ export function PaymentFormCard() {
             <AlertDialogTitle>Confirm Payment</AlertDialogTitle>
             <AlertDialogDescription>
               {selectedMember
-                ? `Record ${formatCurrency(Number.parseFloat(amount) || 0)} from ${selectedMember.name} via ${method}?`
+                ? `Record ${formatINR(Number.parseFloat(amount) || 0)} from ${selectedMember.name} via ${method}?`
                 : "Record this payment?"}
             </AlertDialogDescription>
           </AlertDialogHeader>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Check, Loader2 } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -14,19 +15,26 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-const PAGE_SIZE = 3;
+const PAGE_SIZE = 8;
 
 /**
- * Attendance table: checkbox, member (avatar + name), ID, check-in time.
- * Paginates client-side and resets to page 1 whenever the record set changes.
+ * Attendance table with a per-row present/absent toggle.
  * @param {{
  *   records: import("../lib/attendance").AttendanceRecord[],
- *   loading?: boolean
+ *   loading?: boolean,
+ *   readOnly?: boolean,
+ *   togglingId?: string|null,
+ *   onTogglePresent?: (memberId: string) => void,
  * }} props
  */
-export function AttendanceTable({ records, loading = false }) {
+export function AttendanceTable({
+  records,
+  loading = false,
+  readOnly = false,
+  togglingId = null,
+  onTogglePresent,
+}) {
   const [page, setPage] = useState(1);
-  const [selected, setSelected] = useState({});
 
   useEffect(() => {
     setPage(1);
@@ -38,41 +46,53 @@ export function AttendanceTable({ records, loading = false }) {
     return records.slice(start, start + PAGE_SIZE);
   }, [records, page]);
 
-  const allOnPageSelected =
-    pageRecords.length > 0 &&
-    pageRecords.every((record) => selected[record.id]);
-
-  function toggleAllOnPage() {
-    setSelected((prev) => {
-      const next = { ...prev };
-      const shouldSelect = !allOnPageSelected;
-      pageRecords.forEach((record) => {
-        next[record.id] = shouldSelect;
-      });
-      return next;
-    });
-  }
-
-  function toggleOne(id) {
-    setSelected((prev) => ({ ...prev, [id]: !prev[id] }));
-  }
-
   const rangeStart = records.length === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
   const rangeEnd = Math.min(page * PAGE_SIZE, records.length);
+
+  function renderToggle(record) {
+    const isToggling = togglingId === record.id;
+    if (record.present) {
+      return (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={readOnly || isToggling}
+          onClick={() => onTogglePresent?.(record.id)}
+          className="border-primary/40 text-primary"
+        >
+          {isToggling ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+          ) : (
+            <Check className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
+          Present
+        </Button>
+      );
+    }
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={readOnly || isToggling}
+        onClick={() => onTogglePresent?.(record.id)}
+      >
+        {isToggling ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+        ) : null}
+        Mark Present
+      </Button>
+    );
+  }
 
   return (
     <div className="space-y-3">
       <div className="md:hidden space-y-3">
         {loading ? (
-          Array.from({ length: PAGE_SIZE }).map((_, index) => (
+          Array.from({ length: 3 }).map((_, index) => (
             <div
               key={index}
               className="rounded-lg border border-border bg-card p-3"
             >
-              <div className="mb-2 flex items-center justify-between">
-                <Skeleton className="h-4 w-20" />
-                <Skeleton className="h-4 w-4" />
-              </div>
               <div className="flex items-center gap-3">
                 <Skeleton className="h-10 w-10 rounded-full" />
                 <div className="space-y-2">
@@ -92,32 +112,18 @@ export function AttendanceTable({ records, loading = false }) {
               key={record.id}
               className="rounded-lg border border-border bg-card p-3"
             >
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(selected[record.id])}
-                    onChange={() => toggleOne(record.id)}
-                    aria-label={`Select ${record.name}`}
-                    className="h-4 w-4 rounded border-border accent-primary"
-                  />
-                  <div className="flex items-center gap-3">
-                    <Avatar className="h-9 w-9">
-                      <AvatarFallback>{record.initials}</AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <p className="font-medium text-foreground">
-                        {record.name}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        #{record.memberCode}
-                      </p>
-                    </div>
-                  </div>
+              <div className="mb-3 flex items-center gap-3">
+                <Avatar className="h-9 w-9">
+                  <AvatarFallback>{record.initials}</AvatarFallback>
+                </Avatar>
+                <div>
+                  <p className="font-medium text-foreground">{record.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Member #{record.memberCode}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Check-in</span>
                 <span
                   className={
                     record.present ? "text-foreground" : "text-muted-foreground"
@@ -125,6 +131,7 @@ export function AttendanceTable({ records, loading = false }) {
                 >
                   {record.checkInTime ?? "--:--"}
                 </span>
+                {renderToggle(record)}
               </div>
             </div>
           ))
@@ -135,27 +142,16 @@ export function AttendanceTable({ records, loading = false }) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="w-10">
-                <input
-                  type="checkbox"
-                  checked={allOnPageSelected}
-                  onChange={toggleAllOnPage}
-                  aria-label="Select all members on this page"
-                  className="h-4 w-4 rounded border-border accent-primary"
-                />
-              </TableHead>
               <TableHead>Member</TableHead>
               <TableHead>ID</TableHead>
               <TableHead>Check-in Time</TableHead>
+              <TableHead className="text-right">Status</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
-              Array.from({ length: PAGE_SIZE }).map((_, index) => (
+              Array.from({ length: 3 }).map((_, index) => (
                 <TableRow key={index}>
-                  <TableCell>
-                    <Skeleton className="h-4 w-4" />
-                  </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-3">
                       <Skeleton className="h-9 w-9 rounded-full" />
@@ -167,6 +163,9 @@ export function AttendanceTable({ records, loading = false }) {
                   </TableCell>
                   <TableCell>
                     <Skeleton className="h-4 w-16" />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Skeleton className="ml-auto h-8 w-24" />
                   </TableCell>
                 </TableRow>
               ))
@@ -182,15 +181,6 @@ export function AttendanceTable({ records, loading = false }) {
             ) : (
               pageRecords.map((record) => (
                 <TableRow key={record.id}>
-                  <TableCell>
-                    <input
-                      type="checkbox"
-                      checked={Boolean(selected[record.id])}
-                      onChange={() => toggleOne(record.id)}
-                      aria-label={`Select ${record.name}`}
-                      className="h-4 w-4 rounded border-border accent-primary"
-                    />
-                  </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-3">
                       <Avatar className="h-9 w-9">
@@ -212,6 +202,9 @@ export function AttendanceTable({ records, loading = false }) {
                     }
                   >
                     {record.checkInTime ?? "--:--"}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {renderToggle(record)}
                   </TableCell>
                 </TableRow>
               ))
