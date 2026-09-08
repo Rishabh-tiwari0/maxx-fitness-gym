@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import { Search } from "lucide-react";
-import { addDoc, collection, Timestamp } from "firebase/firestore";
 import { toast } from "sonner";
 
 import { MemberCard } from "@/components/MemberCard";
@@ -19,7 +18,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { db } from "@/lib/firebase/client";
+import { addMemberAction } from "./actions";
 
 const PAGE_SIZE = 12;
 
@@ -91,7 +90,6 @@ export function MembersView({ members }) {
     const { name, value } = event.target;
     setForm((current) => {
       const next = { ...current, [name]: value };
-      // Re-derive the expiry date whenever the plan changes, from today.
       if (name === "planName") {
         next.expiryDate = computeExpiryDate(value);
       }
@@ -123,45 +121,38 @@ export function MembersView({ members }) {
       return;
     }
 
-    const now = new Date();
-    const expiryDate = form.expiryDate ? new Date(form.expiryDate) : new Date();
-    const memberIdNumber = Date.now();
-    const memberRecord = {
-      memberId: memberIdNumber,
-      name,
-      mobile,
-      age: ageValue,
-      gender: form.gender || "male",
-      email: form.email.trim() || null,
-      planName,
-      planAmount,
-      paid: Number(form.paid || 0),
-      pendingAmount,
-      memberAdded: Timestamp.fromDate(now),
-      purchaseDate: Timestamp.fromDate(now),
-      expiryDate: Timestamp.fromDate(expiryDate),
-    };
-
     try {
       setSubmitting(true);
-      const docRef = await addDoc(collection(db, "members"), memberRecord);
-      const savedMember = {
-        ...memberRecord,
-        memberId: String(docRef.id),
-      };
 
-      setMemberRows((current) => [savedMember, ...current]);
+      const result = await addMemberAction({
+        name,
+        mobile,
+        age: ageValue,
+        gender: form.gender || "male",
+        email: form.email.trim() || null,
+        planName,
+        planAmount,
+        paid: Number(form.paid || 0),
+        pendingAmount,
+        expiryDate: form.expiryDate,
+      });
+
+      if (!result.success) {
+        toast.error("Couldn't save member", { description: result.error });
+        return;
+      }
+
+      setMemberRows((current) => [result.member, ...current]);
       setForm(getDefaultForm());
       setIsDialogOpen(false);
       setPage(1);
       toast.success("Member added", {
-        description: `${savedMember.name} was saved to Firestore.`,
+        description: `${result.member.name} was saved to Firestore.`,
       });
     } catch (error) {
       console.error("Failed to add member:", error);
       toast.error("Couldn't save member", {
-        description:
-          "Something went wrong writing to Firestore. Please try again.",
+        description: "Something went wrong. Please try again.",
       });
     } finally {
       setSubmitting(false);

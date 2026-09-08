@@ -3,13 +3,6 @@
 import { useMemo, useState } from "react";
 import { ChevronDown, DollarSign, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
-import {
-  addDoc,
-  collection,
-  doc,
-  Timestamp,
-  updateDoc,
-} from "firebase/firestore";
 
 import { paymentMethods } from "@/data/payment-data";
 import {
@@ -34,7 +27,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatINR } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { db } from "@/lib/firebase/client";
+import { recordPaymentAction } from "@/app/admin/(protected)/payment/actions";
 
 /**
  * @param {{ members: import("@/lib/firebase/members").Member[] }} props
@@ -65,8 +58,6 @@ export function PaymentFormCard({ members }) {
 
   function handleSelectMember(member) {
     setSelectedMemberId(member.memberId);
-    // Pre-fill with what's actually owed; staff can still edit it (e.g. a
-    // partial payment, or collecting next cycle's fee early).
     setAmount(member.pendingAmount > 0 ? String(member.pendingAmount) : "");
     setQuery("");
     setIsSearchOpen(false);
@@ -94,44 +85,35 @@ export function PaymentFormCard({ members }) {
     const numericAmount = Number.parseFloat(amount);
     if (!member || !numericAmount || numericAmount <= 0) return;
 
-    const newPaid = (member.paid ?? 0) + numericAmount;
-    // Amounts beyond what was due count as credit toward the next cycle
-    // rather than going negative here.
-    const newPendingAmount = Math.max(
-      0,
-      (member.pendingAmount ?? 0) - numericAmount,
-    );
-
     try {
       setSubmitting(true);
 
-      // Update the member's running totals...
-      await updateDoc(doc(db, "members", member.memberId), {
-        paid: newPaid,
-        pendingAmount: newPendingAmount,
-      });
-
-      // ...and keep a record of the transaction itself for history/audit.
-      await addDoc(collection(db, "payments"), {
+      const result = await recordPaymentAction({
         memberId: member.memberId,
         memberName: member.name,
+        currentPaid: member.paid ?? 0,
+        currentPending: member.pendingAmount ?? 0,
         amount: numericAmount,
         method,
-        recordedAt: Timestamp.now(),
       });
+
+      if (!result.success) {
+        toast.error("Couldn't record payment", { description: result.error });
+        return;
+      }
 
       setMemberRows((current) =>
         current.map((row) =>
           row.memberId === member.memberId
-            ? { ...row, paid: newPaid, pendingAmount: newPendingAmount }
+            ? { ...row, paid: result.paid, pendingAmount: result.pendingAmount }
             : row,
         ),
       );
 
       toast.success("Payment recorded", {
         description:
-          newPendingAmount > 0
-            ? `${formatINR(numericAmount)} from ${member.name} — ${formatINR(newPendingAmount)} still due.`
+          result.pendingAmount > 0
+            ? `${formatINR(numericAmount)} from ${member.name} — ${formatINR(result.pendingAmount)} still due.`
             : `${formatINR(numericAmount)} from ${member.name} — fully paid up.`,
       });
 
@@ -141,8 +123,7 @@ export function PaymentFormCard({ members }) {
     } catch (error) {
       console.error("Failed to record payment:", error);
       toast.error("Couldn't record payment", {
-        description:
-          "Something went wrong writing to Firestore. Please try again.",
+        description: "Something went wrong. Please try again.",
       });
     } finally {
       setSubmitting(false);

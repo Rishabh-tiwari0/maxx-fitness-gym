@@ -1,15 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
-import { collection, getDocs } from "firebase/firestore";
 import { toast } from "sonner";
 
 import { StatCard } from "@/components/StatCard";
 import { MemberTable } from "@/components/MemberTable";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import { db } from "@/lib/firebase/client";
 
 function parseDateValue(value) {
   if (!value) return null;
@@ -56,53 +53,28 @@ function toDashboardMember(member) {
   };
 }
 
-export default function DashboardView() {
-  const [members, setMembers] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadMembers() {
-      try {
-        const snapshot = await getDocs(collection(db, "members"));
-        const rows = snapshot.docs.map((doc) => ({
-          ...doc.data(),
-          id: doc.id,
-        }));
-
-        if (!active) return;
-        setMembers(rows);
-      } catch (error) {
-        console.error("Failed to load dashboard members:", error);
-        if (active) setMembers([]);
-      } finally {
-        if (active) setLoading(false);
-      }
-    }
-
-    loadMembers();
-    return () => {
-      active = false;
-    };
-  }, []);
+/**
+ * @param {{ members: import("@/lib/firebase/members").Member[] }} props
+ */
+export default function DashboardView({ members }) {
+  const [rows] = useState(members);
 
   const dashboardStats = useMemo(() => {
-    const totalMembers = members.length;
-    const activeCount = members.filter(
+    const totalMembers = rows.length;
+    const activeCount = rows.filter(
       (member) => normalizeMemberStatus(member) === "active",
     ).length;
-    const expiringSoon = members.filter((member) => {
+    const expiringSoon = rows.filter((member) => {
       const expiry = parseDateValue(member.expiryDate);
       if (!expiry) return false;
       const diffDays = (expiry.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
       return diffDays >= 0 && diffDays <= 7;
     }).length;
-    const pendingAmount = members.reduce(
+    const pendingAmount = rows.reduce(
       (sum, member) => sum + Number(member.pendingAmount ?? 0),
       0,
     );
-    const monthlyCollection = members.reduce(
+    const monthlyCollection = rows.reduce(
       (sum, member) => sum + Number(member.paid ?? 0),
       0,
     );
@@ -144,11 +116,11 @@ export default function DashboardView() {
         icon: null,
       },
     ];
-  }, [members]);
+  }, [rows]);
 
   const recentMemberActivity = useMemo(
     () =>
-      members
+      rows
         .map(toDashboardMember)
         .sort((a, b) => {
           const aDate = a.dueDate ? new Date(a.dueDate).getTime() : 0;
@@ -156,7 +128,7 @@ export default function DashboardView() {
           return aDate - bDate;
         })
         .slice(0, 5),
-    [members],
+    [rows],
   );
 
   function handleRemind(memberId) {
@@ -180,19 +152,15 @@ export default function DashboardView() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        {loading
-          ? Array.from({ length: 5 }).map((_, index) => (
-              <Skeleton key={index} className="h-24 w-full rounded-xl" />
-            ))
-          : dashboardStats.map((stat) => (
-              <StatCard
-                key={stat.id}
-                label={stat.label}
-                value={stat.value}
-                accent={stat.accent}
-                icon={stat.icon}
-              />
-            ))}
+        {dashboardStats.map((stat) => (
+          <StatCard
+            key={stat.id}
+            label={stat.label}
+            value={stat.value}
+            accent={stat.accent}
+            icon={stat.icon}
+          />
+        ))}
       </div>
 
       <Card>
@@ -208,7 +176,7 @@ export default function DashboardView() {
         <CardContent>
           <MemberTable
             members={recentMemberActivity}
-            loading={loading}
+            loading={false}
             onRemind={handleRemind}
           />
         </CardContent>
