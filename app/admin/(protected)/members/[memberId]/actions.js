@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidateTag } from "next/cache";
 
 import { deleteMember } from "@/lib/firebase/members";
 import { getSessionUser } from "@/lib/session";
@@ -22,7 +22,10 @@ export async function deleteMemberAction(memberId) {
 
   try {
     await deleteMember(memberId);
-    revalidatePath("/admin/members");
+    // revalidateTag busts the cache on every page that shows member data
+    // (Dashboard, Members list, Payment page) — not just /admin/members.
+    revalidateTag("members");
+    revalidateTag("stats");
     return { success: true };
   } catch (error) {
     console.error("deleteMemberAction failed:", error);

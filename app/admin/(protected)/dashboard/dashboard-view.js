@@ -1,42 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 
 import { StatCard } from "@/components/StatCard";
 import { MemberTable } from "@/components/MemberTable";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-
-function parseDateValue(value) {
-  if (!value) return null;
-
-  if (typeof value?.toDate === "function") {
-    return value.toDate();
-  }
-
-  if (typeof value === "string") {
-    const parsed = new Date(value);
-    if (!Number.isNaN(parsed.getTime())) return parsed;
-
-    const alt = new Date(
-      value.replace(/\b(\d{1,2})\s+(\w{3})\s+(\d{4})\b/, "$1 $2 $3"),
-    );
-    if (!Number.isNaN(alt.getTime())) return alt;
-  }
-
-  return null;
-}
-
-function normalizeMemberStatus(member) {
-  const pendingAmount = Number(member.pendingAmount ?? 0);
-  if (pendingAmount > 0) return "pending";
-
-  const expiry = parseDateValue(member.expiryDate);
-  if (!expiry) return "active";
-
-  return expiry.getTime() < Date.now() ? "expired" : "active";
-}
+import { parseDateValue, getMembershipStatus } from "@/lib/membership";
 
 function toDashboardMember(member) {
   const id = String(member.memberId ?? member.id ?? "");
@@ -49,86 +20,69 @@ function toDashboardMember(member) {
     phone: member.mobile ?? "N/A",
     plan: member.planName ?? "Monthly",
     dueDate,
-    status: normalizeMemberStatus(member),
+    status: getMembershipStatus(member),
   };
 }
 
 /**
- * @param {{ members: import("@/lib/firebase/members").Member[] }} props
+ * @param {{
+ *   stats: import("@/lib/firebase/stats").DashboardStats,
+ *   recentMembers: import("@/lib/firebase/members").Member[],
+ *   monthlyCollection: number,
+ * }} props
  */
-export default function DashboardView({ members }) {
-  const [rows] = useState(members);
-
-  const dashboardStats = useMemo(() => {
-    const totalMembers = rows.length;
-    const activeCount = rows.filter(
-      (member) => normalizeMemberStatus(member) === "active",
-    ).length;
-    const expiringSoon = rows.filter((member) => {
-      const expiry = parseDateValue(member.expiryDate);
-      if (!expiry) return false;
-      const diffDays = (expiry.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
-      return diffDays >= 0 && diffDays <= 7;
-    }).length;
-    const pendingAmount = rows.reduce(
-      (sum, member) => sum + Number(member.pendingAmount ?? 0),
-      0,
-    );
-    const monthlyCollection = rows.reduce(
-      (sum, member) => sum + Number(member.paid ?? 0),
-      0,
-    );
-
-    return [
+export default function DashboardView({
+  stats,
+  recentMembers,
+  monthlyCollection,
+}) {
+  // Stats come pre-computed from Firestore aggregation queries (4 reads total).
+  // No need to iterate over all members here.
+  const dashboardStats = useMemo(
+    () => [
       {
         id: "total-members",
         label: "TOTAL MEMBERS",
-        value: totalMembers.toLocaleString(),
+        value: (stats.totalMembers ?? 0).toLocaleString(),
         accent: "none",
         icon: null,
       },
       {
         id: "active",
         label: "ACTIVE",
-        value: activeCount.toLocaleString(),
+        value: (stats.activeMembers ?? 0).toLocaleString(),
         accent: "none",
         icon: "bolt",
       },
       {
         id: "expiring-soon",
         label: "EXPIRING SOON",
-        value: expiringSoon.toLocaleString(),
+        value: (stats.expiringSoon ?? 0).toLocaleString(),
         accent: "warning",
         icon: null,
       },
       {
         id: "pending-amount",
         label: "PENDING AMOUNT",
-        value: `₹${pendingAmount.toLocaleString()}`,
+        value: `₹${(stats.totalPending ?? 0).toLocaleString()}`,
         accent: "danger",
         icon: null,
       },
       {
         id: "monthly-collection",
         label: "MONTHLY COLLECTION",
-        value: `₹${monthlyCollection.toLocaleString()}`,
+        value: `₹${Number(monthlyCollection ?? 0).toLocaleString()}`,
         accent: "none",
         icon: null,
       },
-    ];
-  }, [rows]);
+    ],
+    [stats, monthlyCollection],
+  );
 
+  // recentMembers is already the 5 soonest-expiring members from Firestore.
   const recentMemberActivity = useMemo(
-    () =>
-      rows
-        .map(toDashboardMember)
-        .sort((a, b) => {
-          const aDate = a.dueDate ? new Date(a.dueDate).getTime() : 0;
-          const bDate = b.dueDate ? new Date(b.dueDate).getTime() : 0;
-          return aDate - bDate;
-        })
-        .slice(0, 5),
-    [rows],
+    () => recentMembers.map(toDashboardMember),
+    [recentMembers],
   );
 
   function handleRemind(memberId) {

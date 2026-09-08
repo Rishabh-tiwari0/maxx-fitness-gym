@@ -1,7 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronDown, DollarSign, ShieldCheck } from "lucide-react";
+import {
+  CalendarDays,
+  ChevronDown,
+  DollarSign,
+  ShieldCheck,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { paymentMethods } from "@/data/payment-data";
@@ -26,8 +31,25 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatINR } from "@/lib/format";
+import { isMembershipExpired } from "@/lib/membership";
 import { cn } from "@/lib/utils";
 import { recordPaymentAction } from "@/app/admin/(protected)/payment/actions";
+import { PaymentReceiptDialog } from "@/components/PaymentReceiptDialog";
+
+const PLAN_DURATION_MONTHS = {
+  Monthly: 1,
+  Quarterly: 3,
+  "Half-Yearly": 6,
+  Annual: 12,
+};
+
+/** Returns today + the plan's duration as a yyyy-mm-dd string. */
+function computeRenewalDate(planName, from = new Date()) {
+  const months = PLAN_DURATION_MONTHS[planName] ?? 1;
+  const result = new Date(from);
+  result.setMonth(result.getMonth() + months);
+  return result.toISOString().slice(0, 10);
+}
 
 /**
  * @param {{ members: import("@/lib/firebase/members").Member[] }} props
@@ -39,9 +61,11 @@ export function PaymentFormCard({ members }) {
   const [selectedMemberId, setSelectedMemberId] = useState("");
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("cash");
+  const [newExpiryDate, setNewExpiryDate] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [receipt, setReceipt] = useState(null);
 
   const selectedMember =
     memberRows.find((member) => member.memberId === selectedMemberId) ?? null;
@@ -59,6 +83,8 @@ export function PaymentFormCard({ members }) {
   function handleSelectMember(member) {
     setSelectedMemberId(member.memberId);
     setAmount(member.pendingAmount > 0 ? String(member.pendingAmount) : "");
+    // Auto-suggest a renewal date — especially useful when the member is expired.
+    setNewExpiryDate(computeRenewalDate(member.planName));
     setQuery("");
     setIsSearchOpen(false);
     setFormError("");
@@ -78,6 +104,14 @@ export function PaymentFormCard({ members }) {
     setConfirmOpen(true);
   }
 
+  function resetForm() {
+    setSelectedMemberId("");
+    setAmount("");
+    setMethod("cash");
+    setNewExpiryDate("");
+    setFormError("");
+  }
+
   async function handleConfirmPayment() {
     setConfirmOpen(false);
 
@@ -95,6 +129,7 @@ export function PaymentFormCard({ members }) {
         currentPending: member.pendingAmount ?? 0,
         amount: numericAmount,
         method,
+        newExpiryDate: newExpiryDate || undefined,
       });
 
       if (!result.success) {
@@ -105,10 +140,29 @@ export function PaymentFormCard({ members }) {
       setMemberRows((current) =>
         current.map((row) =>
           row.memberId === member.memberId
-            ? { ...row, paid: result.paid, pendingAmount: result.pendingAmount }
+            ? {
+                ...row,
+                paid: result.paid,
+                pendingAmount: result.pendingAmount,
+                // Update expiryDate locally so status badge reflects Active immediately.
+                ...(result.expiryDate ? { expiryDate: result.expiryDate } : {}),
+              }
             : row,
         ),
       );
+
+      // Show the receipt dialog — form reset happens when user closes it.
+      setReceipt({
+        memberName: member.name,
+        memberId: member.memberId,
+        mobile: member.mobile,
+        planName: member.planName,
+        amountPaid: numericAmount,
+        method,
+        paidAt: new Date().toISOString(),
+        validUntil: result.expiryDate ?? newExpiryDate ?? undefined,
+        pendingAmount: result.pendingAmount,
+      });
 
       toast.success("Payment recorded", {
         description:
@@ -116,10 +170,6 @@ export function PaymentFormCard({ members }) {
             ? `${formatINR(numericAmount)} from ${member.name} — ${formatINR(result.pendingAmount)} still due.`
             : `${formatINR(numericAmount)} from ${member.name} — fully paid up.`,
       });
-
-      setSelectedMemberId("");
-      setAmount("");
-      setMethod("cash");
     } catch (error) {
       console.error("Failed to record payment:", error);
       toast.error("Couldn't record payment", {
@@ -260,6 +310,35 @@ export function PaymentFormCard({ members }) {
             </div>
           </div>
 
+          {selectedMember ? (
+            <div className="space-y-1.5">
+              <Label
+                htmlFor="new-expiry-date"
+                className="flex items-center gap-1.5"
+              >
+                <CalendarDays
+                  className="h-3.5 w-3.5 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                New Expiry Date
+                {isMembershipExpired(selectedMember) && (
+                  <span className="ml-1 rounded-full bg-rose-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-rose-600">
+                    Expired — renewal required
+                  </span>
+                )}
+              </Label>
+              <Input
+                id="new-expiry-date"
+                type="date"
+                value={newExpiryDate}
+                onChange={(event) => setNewExpiryDate(event.target.value)}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Leave as-is to extend by plan duration, or set a custom date.
+              </p>
+            </div>
+          ) : null}
+
           {formError ? (
             <p role="alert" className="text-sm text-destructive">
               {formError}
@@ -301,6 +380,14 @@ export function PaymentFormCard({ members }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <PaymentReceiptDialog
+        receipt={receipt}
+        onClose={() => {
+          setReceipt(null);
+          resetForm();
+        }}
+      />
     </div>
   );
 }

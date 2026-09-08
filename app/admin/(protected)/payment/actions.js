@@ -15,6 +15,7 @@ import { getSessionUser } from "@/lib/session";
  * @param {{
  *   memberId: string, memberName: string, currentPaid: number,
  *   currentPending: number, amount: number, method: string,
+ *   newExpiryDate?: string,
  * }} input
  */
 export async function recordPaymentAction({
@@ -24,6 +25,7 @@ export async function recordPaymentAction({
   currentPending,
   amount,
   method,
+  newExpiryDate,
 }) {
   const user = await getSessionUser();
   if (!user) {
@@ -43,10 +45,21 @@ export async function recordPaymentAction({
   try {
     const batch = adminDb.batch();
 
-    batch.update(adminDb.collection("members").doc(memberId), {
+    const memberUpdate = {
       paid: newPaid,
       pendingAmount: newPendingAmount,
-    });
+    };
+
+    // If the admin specified a new expiry date (renewal), extend the membership.
+    let expiryISO = null;
+    if (newExpiryDate) {
+      const expiryDate = new Date(newExpiryDate);
+      memberUpdate.expiryDate = Timestamp.fromDate(expiryDate);
+      memberUpdate.purchaseDate = Timestamp.now();
+      expiryISO = expiryDate.toISOString();
+    }
+
+    batch.update(adminDb.collection("members").doc(memberId), memberUpdate);
 
     batch.set(adminDb.collection("payments").doc(), {
       memberId,
@@ -57,9 +70,18 @@ export async function recordPaymentAction({
     });
 
     await batch.commit();
+    // Bust the members cache so paid/pending balances update everywhere,
+    // and the payments cache so the dashboard monthly total reflects this payment.
     revalidateTag("members");
+    revalidateTag("payments");
+    revalidateTag("stats");
 
-    return { success: true, paid: newPaid, pendingAmount: newPendingAmount };
+    return {
+      success: true,
+      paid: newPaid,
+      pendingAmount: newPendingAmount,
+      expiryDate: expiryISO,
+    };
   } catch (error) {
     console.error("recordPaymentAction failed:", error);
     return { success: false, error: "Could not record payment. Try again." };

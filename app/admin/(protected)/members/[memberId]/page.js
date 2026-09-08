@@ -12,9 +12,12 @@ import {
 
 import { getMemberById } from "@/lib/firebase/members";
 import { getMonthlyAttendanceCount } from "@/lib/firebase/attendance";
+import { isMembershipExpired, hasPendingDues } from "@/lib/membership";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DeleteMemberButton } from "@/components/DeleteMemberButton";
+import { EditMemberButton } from "@/components/EditMemberButton";
+import { MemberIdCard } from "@/components/MemberIdCard";
 import { formatINR, formatISODateTimeLabel, getInitials } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -48,9 +51,8 @@ export default async function MemberDetailsPage({ params }) {
   const monthlyAttendance = await getMonthlyAttendanceCount(memberId, isoMonth);
 
   const today = new Date();
-  const expiry = member.expiryDate ? new Date(member.expiryDate) : null;
-  const isExpired = expiry ? expiry.getTime() < today.getTime() : false;
-  const hasPending = (member.pendingAmount ?? 0) > 0;
+  const isExpired = isMembershipExpired(member);
+  const hasPending = hasPendingDues(member);
   const monthLabel = today.toLocaleDateString("en-US", { month: "long" });
 
   return (
@@ -89,6 +91,8 @@ export default async function MemberDetailsPage({ params }) {
           ) : (
             <Badge variant="secondary">Paid up</Badge>
           )}
+          <EditMemberButton member={member} />
+          <MemberIdCard member={member} />
           <DeleteMemberButton
             memberId={member.memberId}
             memberName={member.name}

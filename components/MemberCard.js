@@ -3,6 +3,7 @@ import { CalendarDays, Phone, ShieldCheck } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { formatINR, formatISODateTimeLabel, getInitials } from "@/lib/format";
+import { isMembershipExpired, hasPendingDues } from "@/lib/membership";
 
 /**
  * Summary card for one member, shown in the Members grid. The whole card is
@@ -10,7 +11,8 @@ import { formatINR, formatISODateTimeLabel, getInitials } from "@/lib/format";
  * @param {{ member: import("@/lib/firebase/members").Member }} props
  */
 export function MemberCard({ member }) {
-  const hasPending = (member.pendingAmount ?? 0) > 0;
+  const expired = isMembershipExpired(member);
+  const hasPending = hasPendingDues(member);
 
   return (
     <Link href={`/admin/members/${member.memberId}`} className="block">
@@ -29,15 +31,26 @@ export function MemberCard({ member }) {
               </div>
             </div>
 
-            {hasPending ? (
-              <span className="rounded-full bg-rose-500/15 px-2 py-1 text-[10px] font-semibold uppercase text-rose-600">
-                Due {formatINR(member.pendingAmount)}
+            <div className="flex flex-col items-end gap-1">
+              <span
+                className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase ${
+                  expired
+                    ? "bg-rose-500/15 text-rose-600"
+                    : "bg-emerald-500/15 text-emerald-600"
+                }`}
+              >
+                {expired ? "Expired" : "Active"}
               </span>
-            ) : (
-              <span className="rounded-full bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold uppercase text-emerald-600">
-                Paid up
-              </span>
-            )}
+              {hasPending ? (
+                <span className="rounded-full bg-rose-500/15 px-2 py-1 text-[10px] font-semibold uppercase text-rose-600">
+                  Due {formatINR(member.pendingAmount)}
+                </span>
+              ) : (
+                <span className="rounded-full bg-emerald-500/15 px-2 py-1 text-[10px] font-semibold uppercase text-emerald-600">
+                  Paid up
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="mt-4 space-y-2 text-sm text-muted-foreground">
