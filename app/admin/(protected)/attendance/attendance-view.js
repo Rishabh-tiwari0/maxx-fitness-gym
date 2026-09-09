@@ -196,14 +196,14 @@ export default function AttendanceView({
           onChange={setSearch}
           placeholder="Search members..."
           ariaLabel="Search members"
-          className="flex-1"
+          className="w-full flex-1"
         />
         <DatePickerField
           value={selectedDate}
           onChange={setSelectedDate}
           max={today}
           ariaLabel="Select attendance date"
-          className="sm:w-56"
+          className="w-full sm:w-56"
         />
       </div>
 

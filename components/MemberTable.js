@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { MoreHorizontal } from "lucide-react";
 
 import { StatusBadge } from "@/components/StatusBadge";
@@ -8,6 +9,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,6 +24,41 @@ import {
 import { formatDateLabel } from "@/lib/format";
 
 /**
+ * Dropdown menu that navigates to the member's detail page for each action.
+ * Uses onSelect + router.push (the correct Radix UI navigation pattern).
+ */
+function MemberActions({ member }) {
+  const router = useRouter();
+  const base = `/admin/members/${member.id}`;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label={`More actions for ${member.name}`}
+        >
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={() => router.push(base)}>
+          View profile
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => router.push(`${base}?action=edit`)}>
+          Edit plan
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => router.push(`${base}#payments`)}>
+          Payment history
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
  * Recent member activity table: Name, Phone, Plan, Due Date, Status, Action.
  * @param {{
  *   members: import("../data/dashboard-data").MemberActivity[],
@@ -32,11 +69,12 @@ import { formatDateLabel } from "@/lib/format";
 export function MemberTable({ members, loading = false, onRemind }) {
   return (
     <>
+      {/* ── Mobile cards ── */}
       <div className="space-y-3 md:hidden">
         {loading
-          ? Array.from({ length: 4 }).map((_, index) => (
+          ? Array.from({ length: 4 }).map((_, i) => (
               <div
-                key={index}
+                key={i}
                 className="rounded-lg border border-border bg-card p-3"
               >
                 <div className="mb-2 flex items-center justify-between">
@@ -86,28 +124,14 @@ export function MemberTable({ members, loading = false, onRemind }) {
                       Remind
                     </Button>
                   ) : (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={`More actions for ${member.name}`}
-                        >
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem>View profile</DropdownMenuItem>
-                        <DropdownMenuItem>Edit plan</DropdownMenuItem>
-                        <DropdownMenuItem>Payment history</DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    <MemberActions member={member} />
                   )}
                 </div>
               </div>
             ))}
       </div>
 
+      {/* ── Desktop table ── */}
       <div className="hidden md:block">
         <Table>
           <TableHeader>
@@ -122,10 +146,10 @@ export function MemberTable({ members, loading = false, onRemind }) {
           </TableHeader>
           <TableBody>
             {loading
-              ? Array.from({ length: 4 }).map((_, index) => (
-                  <TableRow key={index}>
-                    {Array.from({ length: 6 }).map((__, cellIndex) => (
-                      <TableCell key={cellIndex}>
+              ? Array.from({ length: 4 }).map((_, i) => (
+                  <TableRow key={i}>
+                    {Array.from({ length: 6 }).map((__, ci) => (
+                      <TableCell key={ci}>
                         <Skeleton className="h-4 w-20" />
                       </TableCell>
                     ))}
@@ -158,22 +182,7 @@ export function MemberTable({ members, loading = false, onRemind }) {
                           Remind
                         </Button>
                       ) : (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              aria-label={`More actions for ${member.name}`}
-                            >
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem>View profile</DropdownMenuItem>
-                            <DropdownMenuItem>Edit plan</DropdownMenuItem>
-                            <DropdownMenuItem>Payment history</DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                        <MemberActions member={member} />
                       )}
                     </TableCell>
                   </TableRow>

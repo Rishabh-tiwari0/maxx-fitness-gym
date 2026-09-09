@@ -27,20 +27,25 @@ export function StatCard({ label, value, accent = "none", icon = null }) {
   return (
     <Card
       className={cn(
-        "relative border-l-4 px-5 py-4",
-        ACCENT_BORDER[accent] ?? ACCENT_BORDER.none
+        "relative border-l-4 px-4 py-4 sm:px-5",
+        ACCENT_BORDER[accent] ?? ACCENT_BORDER.none,
       )}
     >
       <div className="flex items-start justify-between gap-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground sm:text-xs">
           {label}
         </p>
-        {Icon ? <Icon className="h-4 w-4 text-muted-foreground/70" aria-hidden="true" /> : null}
+        {Icon ? (
+          <Icon
+            className="h-4 w-4 shrink-0 text-muted-foreground/70"
+            aria-hidden="true"
+          />
+        ) : null}
       </div>
       <p
         className={cn(
-          "mt-2 font-display text-3xl font-extrabold tracking-tight",
-          icon === "bolt" && "text-primary"
+          "mt-2 font-display text-2xl font-extrabold tracking-tight sm:text-3xl",
+          icon === "bolt" && "text-primary",
         )}
       >
         {value}

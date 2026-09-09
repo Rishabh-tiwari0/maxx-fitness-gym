@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 
 export function LocationSection() {
   return (
-    <section id="location" className="container py-16">
+    <section id="location" className="container py-16 px-4 sm:px-0">
       <div className="overflow-hidden rounded-xl border border-border">
         <div className="relative aspect-video w-full overflow-hidden bg-muted">
           <iframe
@@ -17,8 +17,8 @@ export function LocationSection() {
             allowFullScreen
           />
         </div>
-        <div className="bg-card px-6 py-8 text-center">
-          <h2 className="font-display text-2xl font-extrabold uppercase tracking-tight">
+        <div className="bg-card px-4 py-6 text-center sm:px-6 sm:py-8">
+          <h2 className="font-display text-xl font-extrabold uppercase tracking-tight sm:text-2xl">
             {location.title}
           </h2>
           <p className="mt-2 flex items-center justify-center gap-1.5 text-sm text-muted-foreground">

@@ -181,7 +181,7 @@ export function PaymentFormCard({ members }) {
   }
 
   return (
-    <div className="mx-auto w-full max-w-md space-y-4 px-1 sm:px-0">
+    <div className="mx-auto w-full max-w-md space-y-4 px-0 sm:px-0">
       <Card>
         <CardHeader className="px-4 text-center sm:px-6">
           <CardTitle className="text-xl uppercase sm:text-2xl">
@@ -290,7 +290,7 @@ export function PaymentFormCard({ members }) {
 
           <div className="space-y-1.5">
             <Label>Payment Method</Label>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {paymentMethods.map((option) => (
                 <button
                   key={option.id}

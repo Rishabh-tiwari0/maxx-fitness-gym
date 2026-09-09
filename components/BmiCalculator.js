@@ -40,14 +40,14 @@ export function BmiCalculator() {
   }
 
   return (
-    <Card id="body-metrics" className="mx-auto max-w-md">
-      <CardHeader>
+    <Card id="body-metrics" className="mx-auto w-full max-w-md">
+      <CardHeader className="px-4 sm:px-6">
         <CardTitle className="flex items-center gap-2 uppercase">
           <Ruler className="h-4 w-4 text-primary" aria-hidden="true" />
           {bodyMetrics.title}
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-4 px-4 sm:px-6">
         <div className="space-y-1.5">
           <Label htmlFor="bmi-height">Height (cm)</Label>
           <Input
@@ -73,7 +73,10 @@ export function BmiCalculator() {
           />
         </div>
 
-        <Button onClick={handleCalculate} className="w-full uppercase tracking-wide">
+        <Button
+          onClick={handleCalculate}
+          className="w-full uppercase tracking-wide"
+        >
           Calculate
         </Button>
 
@@ -85,8 +88,15 @@ export function BmiCalculator() {
 
         {result ? (
           <div className="rounded-lg border border-border bg-secondary/40 p-4 text-center">
-            <p className="font-display text-3xl font-extrabold">{result.value}</p>
-            <p className={cn("mt-1 text-sm font-semibold uppercase tracking-wide", result.tone)}>
+            <p className="font-display text-3xl font-extrabold">
+              {result.value}
+            </p>
+            <p
+              className={cn(
+                "mt-1 text-sm font-semibold uppercase tracking-wide",
+                result.tone,
+              )}
+            >
               {result.label}
             </p>
           </div>
