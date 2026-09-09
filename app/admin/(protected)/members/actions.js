@@ -49,6 +49,7 @@ export async function addMemberAction(input) {
 
   const now = new Date();
   const expiry = expiryDate ? new Date(expiryDate) : now;
+  const paidAmount = paid ?? 0;
 
   const record = {
     name: name.trim(),
@@ -58,7 +59,7 @@ export async function addMemberAction(input) {
     email: email?.trim() || null,
     planName: planName.trim(),
     planAmount,
-    paid: paid ?? 0,
+    paid: paidAmount,
     pendingAmount: pendingAmount ?? 0,
     memberAdded: Timestamp.fromDate(now),
     purchaseDate: Timestamp.fromDate(now),
@@ -66,10 +67,28 @@ export async function addMemberAction(input) {
   };
 
   try {
+    const batch = adminDb.batch();
+
+    // Write the new member document.
     const docRef = adminDb.collection("members").doc();
-    await docRef.set(record);
+    batch.set(docRef, record);
+
+    // If the member paid upfront, record it in the payments collection so
+    // it shows up in the monthly collection total on the dashboard.
+    if (paidAmount > 0) {
+      batch.set(adminDb.collection("payments").doc(), {
+        memberId: docRef.id,
+        memberName: name.trim(),
+        amount: paidAmount,
+        method: "Cash", // enrollment payments default to Cash
+        recordedAt: Timestamp.fromDate(now),
+      });
+    }
+
+    await batch.commit();
     revalidateTag("members");
     revalidateTag("stats");
+    if (paidAmount > 0) revalidateTag("payments");
 
     return {
       success: true,
